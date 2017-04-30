@@ -1,0 +1,206 @@
+通过之前文章的描述，我们已经有能力设计并部署搭建HBase集群了   
+当我们的HBase集群开始运行的时候，新的挑战又来了   
+例如，我们可能会遇到在集群运行的时候添加或者删除节点   
+又或者需要拷贝/备份整个集群的数据等等   
+如何在集群运行的时候以最小的代价来执行这些操作呢？   
+
+下面总结一下HBase集群的相关运维和管理知识点
+
+## 运维任务
+
+### 添加/删除节点
+
+在HBase中动态添加/删除节点非常简单，只需要一些命令操作即可，HBase会自动帮你处理节点上下线需要做的事情
+
+**添加节点**
+
+> 1.修改conf目录下的regionservers文件，将新节点的主机名另起一行添加进去
+> 2.复制该文件到集群中的所有机器   
+> 3.启动该机器完成节点的添加
+
+节点启动之后会在ZK上注册创建对应的znode，**然后它会加入集群被分配region等**   
+启动该节点的方式有两种：
+
+> * master节点上执行start-hbase.sh脚本，其会检查regionservers文件并跳过已经启动的子节点，将其中未启动的节点启动   
+> * 对应的子节点上执行hbase-daemon.sh start regionserver命令，随后该机器上的RegionServer服务启动
+
+**删除节点**
+
+首先到需要停止运行的机器上执行：
+
+```shell
+hbase-daemon.sh stop regionserver
+```
+
+随后该节点关闭所有region，停止进程   
+ZK中的znode临时节点将会过期，master会注意到该region服务器停止了，**并按照故障处理的流程将该机器上的所有region重新分配到其他机器上**   
+
+下线节点需要注意两点：
+
+> 1.如果负载均衡进程正在执行，请先停止，因为其可能会和master转移region产生竞争   
+> 2.如果该节点上的数据量很大，移动region的过程可能很漫长
+
+另外，在HBase0.90.2以上的版本中可以使用graceful_stop.sh hostname来下线节点    
+顾名思义，该脚本可以让节点的下线过程变得“优雅”起来：将region从对应的服务器上一个个移动出来以减少扰动
+
+### 添加备份master节点
+
+由于HBase本身并没有自动提供像HDFS那样的Namenode双节点方案，所以一个潜在的风险就是单点故障问题   
+但是HBase允许我们手动启动一个备份的master节点来避免这个问题
+
+多个master节点存在的情况下，它们会竞争ZK中专用的znode，第一个竞争到的master来提供服务    
+**其余的master进程只是轮询检查这个znode，当它消失时再次竞争**
+
+我们可以在集群中的另外一台配置一样的机器上启动备用master：
+
+```shell
+hbase-daemon.sh start master
+```
+
+从0.90.x版本开始，也可以在conf目录下的backup-master文件来执行备用服务器   
+编辑方式和regionservers一样   
+该文件中的master会在集群中的主master和regionserver都启动之后才会启动
+
+由于master只被设计为集群运行时的协调者，并不占用太多资源   
+所以启动多个备用master并没有什么影响，反而启动太少可能会留下隐患   
+建议启动两到三个备用master比较合适   
+
+## 数据迁移任务
+
+### 导入和导出
+
+HBase的jar包中包含了两个以MapReduce作业形式来导入导出数据的工具   
+使用方式为：
+
+```shell
+hadoop jar ${hbase.jar} export ${tablename} ${outputdir}
+```
+
+该工具其余的参数可以做到增量导出、控制导出的数据版本等功能，具体使用请看jar包的帮助信息   
+导出的数据将会存储在HDFS指定的目录上，之后可以使用hadoop distcp命令拷贝到其他集群上，并在该集群上进行导入操作   
+需要注意的是，导出的表和导入的表需要有相同的表模式
+
+将export导出的文件数据导入到hbase中，使用方式如下：
+
+```shell
+hadoop jar hbase-server-*.jar import -D <property=value>* 表名 生成文件路径 
+```
+
+其中-D后面的参数包括但不限于为以下几个
+
+> * HBASE_IMPORTER_RENAME_CFS：重命名列族，格式为"旧列族名:新列族名"   
+> * import.filter.class：指定过滤器类型，在数据写入前进行过滤   
+> * import.filter.args：指定过滤器之后提供的参数   
+> * import.bulk.output：指定了该参数之后不会直接写入数据，而是生成hfile文件用于bulkload
+
+可能会有人注意到，其实我们是可以直接使用hadoop distcp命令将HDFS上的hbase根目录整个拷贝到其他集群中   
+但是这个做法并不推荐，**因为这个操作会忽略文件的状态和内存中还没有被刷写的数据**
+
+### CopyTable工具
+
+另一个导出HBase表数据的工具是CopyTable，该工具的使用方式很简单，参考帮助信息中的例子即可操作
+
+其是通过mr程序将数据逐条put到目标表中的（TableInputFormat和TableOutputFormat）
+
+使用方式如下：
+
+```shell
+hadoop jar hbase-server-*.jar copytable -D <property=value>*
+```
+
+-D的参数涵括但不限于以下几个
+
+> * --startrow=起始Rowkey
+> * --stoprow=终止Rowkey
+> * --starttime=起始时间戳
+> * --endtime=终止时间戳
+> * --versions=保留的版本数
+> * --all.cells=是否拷贝删除标记的数据
+> * --new.name=目标表名
+> * --peer.adr=目标zk-ip:zk-port:hbase在zk中的根目录，**必须指定**
+> * --families=旧列族名:新列族名，如果一致则指定一个即可
+> * 表名
+
+### 批量导入
+
+批量导入可以有多种不同的形式，常见的是使用MapReduce和普通的客户端API   
+但是这两种方式都不高效，这里推荐另外一种做法：blukload
+
+blukload是一种将数据文件（可能是普通的文本文件）导入到hbase中的一种工具   
+其运作流程是：
+
+> 1.读取数据文件，格式为Rowkey+\t+col1数据+\t+col2数据...   
+> 2.将数据文件转换为hfile文件   
+> 3.读取hfile文件导入hbase
+
+**使用方式1**
+
+数据文件可以是由程序生成的
+
+使用
+
+```shell
+hadoop jar hbase-server-*.jar importtsv 列名参数 表名 数据文件位置
+```
+
+直接将数据文件导入hbase，其中列名参数具体为**-Dimporttsv.columns=HBASE_ROW_KEY,"列族名:列名"...**
+
+**使用方式2**
+
+编写mr程序读源hbase库，生成hfile文件，OutputFormat要设置为HFileOutputFormat类
+
+之后使用
+
+```shell
+hadoop jar hbase-server-*.jar completebulkload mr结果文件目录 表名
+```
+
+将hfile文件导入目标hbase数据库    
+注意，该mr程序可以只有mapper过程，输出的<key,value>类型为ImmutableBytesWritable和KeyValue
+
+### 复制
+
+hbase中的replication相当于mysql中的主从同步技术，RegionServer会在后台启动一个进程不断put或者delete到同步的集群上   
+**比较适合小集群的热备**
+
+使用replication需要在hbase-site.xml文件中配置以下选项：
+
+|名称|值|描述|
+|---|---|---|
+|hbase.replication|true|开启hbase replication功能，从集群中也要开启|
+|replication.source.nb.capacity|5000|主机群每次向从集群发送entry的最大个数，如果slave较多，可以适当调大|
+|replication.source.size.capacity|4194304|每次发送entry包的最大大小，不推荐太大|
+|replication.source.ratio|1|主机群中使用slave服务器的百分比|
+|hbase.regionserver.wal.enablecompression|false|主机群关闭hlog压缩|
+|replication.sleep.before.failover|5000|主机群RegionServer在当机后多少毫秒开启failover|
+
+配置完毕之后在hbase shell中设置replication的信息：
+
+```shell
+add_peer '1','目标zk-ip:zk-port:hbase在zk中的根目录'
+```
+
+之后可以通过list_peer命令查看设置的replication
+
+### 集群迁移方法对比
+
+|方式|使用场景|注意事项|
+|---|---|---|
+|bulkload|从异构数据库中导入/程序生成的数据文件导入||
+|distcp|整库导入|原库需要停止写入，两边版本需要一致|
+|export+import|不同版本之间导入/只迁移部分数据/导入导出分时段进行|会占用较多磁盘空间，export受数据写入的影响，import会造成局部热点|
+|copytable|导入导出同时进行，比上面一条少了一次文件读写|同上|
+|replication|主从同步/主主同步|短暂延迟，目标表必须存在|
+
+## 改变日志级别
+
+默认HBase的日志是DEBUG级别的，这在安装和设计阶段比较有用   
+它可以让用户在系统出现问题的时候在日志文件中搜寻到比较多的信息
+
+生产环境中用户可以根据需要修改日志的级别为INFO或者WARN   
+修改方式如下：   
+编辑conf目录下的log4j.properties文件   
+将log4j.logger.org.apache.hadoop.hbase=INFO
+
+
+作者：[@小黑](http://www.xiaohei.info)

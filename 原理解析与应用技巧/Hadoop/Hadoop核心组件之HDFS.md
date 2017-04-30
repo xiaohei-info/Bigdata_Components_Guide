@@ -1,0 +1,249 @@
+## HDFS构架三大特点
+
+> * 大数据量：TB甚至PB以上的数据量都可以存储在集群中   
+> * 流式数据访问：HDFS中的数据一般都是**一次写入，多次读取**的模式   
+> * 廉价的商用硬件：可以将集群部署在大量的普通硬件上实现一个功能强大的集群
+
+### 不适用于HDFS的场景：
+
+> * 要求低延迟的数据访问：HDFS是为了高吞吐量而设计的，代价就是延迟高，适合批处理（实时响应的可以选择HBase）   
+> * 大量的小文件：HDFS存储的文件元数据都是**保存在NameNode内存中的**，大概估计一个文件、目录或者数据块占用的内存空间为**150个字节**，如果有上亿个小文件，那么NameNode将会奔溃   
+> * 多用户写入和随意修改文件的要求：HDFS文件只能有一个写入用户，并且内容都是**追加在末尾**，不支持随机写入和修改
+
+## Block块的概念
+
+先不看HDFS的Block，每台机器都有磁盘，机器上的所有持久化数据都是存储在磁盘上的
+
+磁盘是通过**块**来管理数据的，一个块的数据是该磁盘一次能够读写的最小单位，一般是**512个字节**   
+而建立在磁盘之上的文件系统也有块的概念，通常是磁盘块的整数倍，例如**几kb**
+
+HDFS作为一个文件系统，一样有块的概念，对于分布式文件系统，使用文件块将会带来这些好处：
+
+> 1.一个文件的大小不限制于集群中任意机器的磁盘大小   
+> 2.因为块的大小是固定的，相对比不确定大小的文件，块更容易进行管理和计算   
+> 3.块同样方便进行备份操作，以提高数据容错性和系统的可靠性
+
+### 2.x中，HDFS默认的快大小为128M   
+为什么HDFS的块大小会比文件系统的块大那么多呢？
+
+**一个很重要的原因**就是为了最小化磁盘的寻址开销   
+操作数据时，需要先从磁盘上找到指定的数据块然后进行传输，而这就包含两个动作：   
+
+> 1.数据块寻址：找到该数据块的起始位置   
+> 2.数据传输：读取数据
+
+也就是说，操作数据所花费的时间是由步骤12一起决定的，步骤1所花费的时间一般比步骤2要少很多，那么**当操作的数据块越多，寻址所花费的时间在总时间中就越小的可以忽略不计**   
+但是HDFS的Block块也不能设置的太大，**会影响到map任务的启动数**，并行度降低，任务的执行数据将会变慢
+
+## Namenode和Datanode
+
+### Namenode
+
+管理着文件系统的命名空间，维护着文件系统树，**该树中存储着所有文件和目录的元数据信息**   
+这些信息会通过**fsimage和edits文件**被持久化到磁盘中   
+Namenode并不会永久存储块的存储地址，因为这些会在系统启动的时候由Datanode汇报更新并重建
+
+### Datanode
+
+是文件系统的工作节点，负责存储数据，并在受调度的时候检索数据块，**定期向Namenode发送它们存储的数据块列表**
+
+### SecondaryNamenode
+
+负责定期合并Namenode产生的fsimages和edits文件   
+
+> * 如果只使用fsimage，那么当该文件非常大的时候直接对其很难进行操作   
+> * 定期合并fsimage和edits文件是为了防止edits文件过多，系统重启的时候回加载很长时间
+
+并且，SecondaryNamenode和Namenode通常不在一个节点上，因为合并	操作会消耗大量CPU时间，会影响到Namenode的正常工作
+
+### fsimage和edits文件
+
+HDFS进行初次格式化之后将会在$dfs.namenode.name.dir/current目录下生成一些列文件：   
+
+> * VERSION
+> * edits_*
+> * fsimage_0000000000008547077
+> * fsimage_0000000000008547077.md5
+> * seen_txid
+
+VERSION文件的内容是一些HDFS的ID信息，比较重要的是**fsimage、edits和seen_txid**   
+
+fsimage中存储的是HDFS的**元数据信息**，包括文件系统上的文件目录和相关序列化的信息。   
+edits文件保存的是HDFS上的更新操作信息。   
+seen_txid文件保存的是一个数字，就是最后一个edits_的数字。
+
+每次Namenode启动的时候都会将fsimage文件读入内存，并从00001开始到seen_txid中记录的数字依次执行每个edits里面的更新操作，
+保证内存中的元数据信息是最新的、同步的，可以看成Namenode启动的时候就将fsimage和edits文件进行了合并。   
+
+集群启动的之后，每次对HDFS的更新操作都会写入edits文件。
+
+对于一个长期运行中的集群来说，edits文件会一直增大，**SecondaryNamenode会在运行的时候定期将edits文件合并到fsimage中**   
+否则一旦集群重新启动，Namenode加载fsimage使用的时间将会非常久
+
+## HDFS联邦
+
+因为Namenode管理着整个集群的元数据信息，当集群变得非常大的时候，Namenode的内存会变成一个瓶颈   
+这时候可以使用联邦机制来解决：**使用多个Namenode共同管理整个集群**   
+每个Namenode管理不同目录下的元数据，并且互不影响
+
+## HDFS高可靠
+
+### 老版本中的解决方式
+
+当Namenode挂掉之后，管理员可以通过fsimages和edits文件来重新启动一个新的Namenode来提供服务并配置客户端和Datanode连接到这个新的Namenode   
+该Namenode会有一个**冷启动**过程：
+
+> 1.加载fsimage文件到内存中   
+> 2.重做edits文件   
+> 3.接收足够多的Datanode数据块报告直到退出安全模式
+
+对于一个大型集群，这个冷启动过程会消耗非常多的时间
+
+### 2.x中的解决方式
+
+Hadoop2提供了一种双Namenode节点的机制来确保Namenode的高可靠性，一个Namenode为active状态，另外一个为standby状态   
+当active节点失效之后，standby节点会马上进行替换，这个过程中客户端不会察觉到异常
+
+为了实现这个功能，HDFS的构架需要作出以下的调整：
+
+> 1.Namenode之间必要有一个共享edits文件的存储，且该存储必须是**高可用的**   
+> 2.Datanode必须同时向两个Namenode发送数据块报告   
+> 3.客户端需要有如何处理Namenode切换的机制，该机制对于客户端来说是透明的   
+> 4.standby状态的Namenode包含了SecondaryNamenode节点的工作内容
+
+### QJM
+
+对于调整1中的高可用共享存储，可以选择NFS或者QJM来实现，其中QJM是HDFS的专有实现，推荐使用QJM来实现这个共享存储   
+**QJM由一组journal node节点组成，每个edit文件必须写入大部分的journal node节点**   
+一般来说，有3个journal node节点，HDFS可以容忍它们之中的其中一个失效的情况   
+QJM的工作机制和Zookeeper差不多，但是其并不使用Zookeeper进行工作（HDFS的HA是通过Zookeeper来实现的）
+
+当active状态的Namenode失效之后，standby状态的Namenode可以快速切换为active并继续提供服务   
+因为standby状态时，**其内存中也保存着最新的Datanode的数据块列表、最新的edit文件（从QJM中获得）**
+
+当两个Namenode节点都失效的时候，可以使用之前讨论过的方法进行冷启动
+
+### 故障切换
+
+当active Namenode失效之后，将standby Namenode切换为active状态的过程称为故障切换   
+每个Namenode都会运行一个轻量级的failover controller进程，通过**心跳机制**来判断Namenode是否失效，并通过Zookeeper来选举出一个新的active Namenode
+
+## HDFS的Java API
+
+常用的HDFS接口可以参考：
+[HDFS工具类](https://github.com/chubbyjiang/MapReduce/blob/master/src/main/java/info/xiaohei/www/HdfsUtil.java)
+
+以下针对一些API的特性展开讨论
+
+### FSDataInputStream
+
+该类提供了读取HDFS上文件的功能，原型如下：
+
+```java
+public class FSDataInputStream extends DataInputStream 
+	implements Seekable,PositionedReadable{
+	//implementation elided
+}
+```
+
+**Seekable**接口支持从一个文件中定位到指定位置，并提供了一个返回当前位置偏移量的方法，原型如下：
+
+```java
+public interface Seekable{
+	void seek(long pos) throws IOException;
+	long getPos() throws IOException;
+}
+```
+
+PositionedReadable允许从任意位置开始去读文件，原型省略   
+和Seekable配合使用使得FSDataInputStream支持文件的**随机、重复访问**
+
+### 写文件时获得文件写入进度
+
+FileSystem类的create方法有一个重载版本，除了提供第一个路径参数之后，还需要提供一个**Progressable接口对象**   
+Progressable原型如下：
+
+```java
+public interface Progressable{
+	public void progress();
+}
+```
+
+progress方法在**每次写入64kb的数据包到管道中时会被调用一次**，在方法中可以获得文件的写入进度
+
+```java
+OutputStream out = fs.create(new Path(dst),new Progressable(){
+	public void progress(){
+		//将打印出文件写入的进度
+		System.out.println("...")
+	}
+});
+```
+
+## 数据流
+
+### 文件读取流程
+
+![文件读取流程图](/images/hdfs-file-read.png)
+
+如图所示，可分为6个步骤：
+
+> 1.客户端通过DistributedFileSystem打开连接   
+> 2.向Namenode获得该文件存储的元数据，包括划分为几个块，各个块存储在哪些节点（**根据节点离客户端的距离进行排序**），多少个副本等   
+> 3.客户端通过Namenode返回的FSDataInputStream（负责Namenode和Datanode之间的通信）读取指定Datanode上的数据块   
+> 4.读取每个数据块的时候，会选择最近的Datanode进行读取   
+> 5.当前数据块读取完毕，寻找下一个数据块的最近节点   
+> 6.读取完毕后关闭连接
+
+当FSDataInputStream读取Datanode节点上的数据遇到错误的时候（例如，网络错误或者读取过来的数据校验不正确）   
+**会寻找另外一个最近的节点读取其副本，并且将记录该节点是的后续的读取操作不会到该节点上进行**   
+
+在这个设计中，Namenode需要知道各个Datanode和客户端的距离，以**确保客户端可以从最近的节点上获得数据**   
+那么这个距离是怎么算的呢？   
+在分布式文件存储系统中，数据传输的瓶颈是节点之间的网络传输，也就是**带宽**   
+所以HDFS**以两个节点之间的带宽作为距离的衡量标准**
+
+### 节点带宽计算
+
+实际上，节点之间的带宽是很难计算的，为此Hadoop采用了一个简单的方法：通过设定等级，带宽依次递减   
+这里的等级可以为：
+
+> * 相同节点上的不同进程，带宽为0   
+> * 相同机架上的不同节点，带宽为2   
+> * 相同数据中心上的不同机架，带宽为4   
+> * 不同的数据中心，带宽为6
+
+### 文件写入流程
+
+![文件写入流程图](/images/hdfs-file-write.png)
+
+如图所示，可以划分为7个步骤：
+
+> 1.客户端通过DistributedFileSystem发送创建文件的命令   
+> 2.Namenode会进行客户端是否有创建文件的权限以及该文件是否存在等检查，通过之后创建一个没有数据块的文件，并返回FSDataOutputStream   
+> 3.客户端通过FSDataOutputStream写入数据，此时会有一个和副本数相同的Datanode组成的管线等待写入数据（由Namenode确定）   
+> 4.数据包将会在该管线中按顺序写入指定的Datanode中   
+> 5.Datanode写入数据完毕的时候会返回一个ack确认的请求   
+> 6.确认所有数据写入完毕之后，客户端关闭和FSDataOutputStream的连接   
+> 7.DistributedFileSystem向Namenode发送完成的信号，记录数据保存的Datanode信息
+
+在这个过程中，Namenode需要确定数据副本存放在哪些Datanode上   
+这需要在数据的**高可靠性、读写带宽消耗之间做出一个权衡**
+
+### 副本存放策略
+
+副本存放在同一个节点上所消耗的读写带宽是最少的，因为其不需要跨网络进行传输，但这并不能体现副本的作用   
+即数据的高可靠性，一旦该节点失效，那么该数据会全部消失   
+反之，副本存放在不同数据中心是最可靠的，但是其消耗的读写带宽也是最大的
+
+HDFS中默认的副本存放策略是这样的：
+
+> * 如果客户端运行在集群之上，那么第一份副本存放在该客户端节点   
+> * 如果客户端运行在集群之外，那么第一份副本在集群中随机选择一个节点   
+> * 第二份副本选择存放在第一份副本节点的不同机架上的随机一个节点   
+> * 第三份副本选择存放在第二份副本相同机架上的随机一个节点   
+> * 如果副本数超过3，那么剩余的副本将会在集群中随机选择节点进行存放
+
+在选择节点的时候，Hadoop会尽量避免那些繁忙的节点进行存储
+
+作者：[@小黑](http://www.xiaohei.info)
