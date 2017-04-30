@@ -51,7 +51,3 @@ do
 sudo rsync -avz --exclude-from rsync-exclude.list ${需要同步的目录} $host:${目标节点的目录}
 done
 ```
-
-作者：[@小黑][1]
-
-[1]:http://www.xiaohei.info

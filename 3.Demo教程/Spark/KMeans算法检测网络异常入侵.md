@@ -388,5 +388,3 @@ setEpsilon设置迭代过程中,质心的最小移动值，移动值越小使得
 KMeans训练出来的模型还可以和Spark Streaming相结合，搭建出实时的网络流量异常预警系统
 
 [Github源码地址](https://github.com/chubbyjiang/spark-demo/tree/master/src/main/scala/info/xiaohei/www/spark/examples/kmeans)
-
-作者：[@小黑](http://www.xiaohei.info)

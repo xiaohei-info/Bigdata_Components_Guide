@@ -266,5 +266,3 @@ ${OLD_HADOOP}/in/start-dfs.sh -rollback
 ```
 
 该命令会让Namenode和Datanode使用升级之前的副本替换当前存储目录，文件系统恢复之前的状态ghe
-
-作者：[@小黑](http://www.xiaohei.info)

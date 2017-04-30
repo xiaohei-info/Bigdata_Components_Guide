@@ -201,7 +201,3 @@ start-yarn.sh
 
 > * 在本地启动ResourceManager进程   
 > * 在slaves文件中记录的所有机器上启动NodeManager进程   
-
-
-
-作者：[@小黑](http://www.xiaohei.info)

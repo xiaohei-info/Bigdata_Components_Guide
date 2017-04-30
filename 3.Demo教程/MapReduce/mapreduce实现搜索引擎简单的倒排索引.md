@@ -168,5 +168,3 @@ public static void main(String[] args) throws Exception {
     }
 
 ```
-
-作者：[@小黑](http://www.xiaohei.info)

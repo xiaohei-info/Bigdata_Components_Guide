@@ -43,5 +43,3 @@ job.setCombinerClass(JReducer.class);
 
 其实combiner和reducer都是设置的JReducer
 侧面反映了combiner的角色作就是本地的reducer
-
-作者：[@小黑](http://www.xiaohei.info)

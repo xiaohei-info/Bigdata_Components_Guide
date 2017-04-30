@@ -105,7 +105,3 @@ quit
 ```
 
 重启hbase。
-
-作者：[@小黑][1]
-
-[1]:http://www.xiaohei.info

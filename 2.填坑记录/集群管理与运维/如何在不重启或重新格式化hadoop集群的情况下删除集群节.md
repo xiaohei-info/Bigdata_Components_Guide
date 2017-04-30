@@ -16,5 +16,3 @@
 ./hadoop dfsadmin -refreshNodes
 重新加载配置
 成功之后可以将已经移除的节点从excludes文件中删除
-
-作者：[@小黑](http://www.xiaohei.info)

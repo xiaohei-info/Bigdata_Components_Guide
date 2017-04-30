@@ -179,5 +179,3 @@ job.setGroupingComparatorClass(MyGroupingComparator.class);
 再次运行程序可得到如下图的结果：
 
 ![图片](http://img.blog.csdn.net/20150211183156890?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvcXExMDEwODg1Njc4/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/Center)
-
-作者：[@小黑](http://www.xiaohei.info)

@@ -289,7 +289,3 @@ myTable.flushCommits()//关键点3
 [【C#】通过Thrift操作HBase系列（1）](http://blog.csdn.net/sunthx/article/details/8818838)
 [ALS 在 Spark MLlib 中的实现](http://www.dataguru.cn/article-7049-1.html)
 [基于矩阵分解的协同过滤算法](http://www.docin.com/p-714582034.html)
-
-
-
-作者：[@小黑](http://www.xiaohei.info)

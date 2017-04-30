@@ -1046,6 +1046,3 @@ echo "-g    :generate kerberos principal for hadoop users"
 ;;
 esac
 ```
-
-
-作者：[@小黑](http://www.xiaohei.info)

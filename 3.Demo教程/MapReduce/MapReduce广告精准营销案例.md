@@ -74,5 +74,3 @@ key:打车_微博Id1,value:5
 ## 代码
 
 [源码地址](https://github.com/chubbyjiang/MapReduce)第10部分(weiboad)
-
-作者：[@小黑](http://www.xiaohei.info)
