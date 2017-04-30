@@ -184,5 +184,3 @@ org.apache.hadoop.yarn.server.resourcemanager.scheduler.fair.FairScheduler
 ```
 
 上面的配置文件将会产生和之前Capacity配置的一样的队列
-
-作者：[@小黑](http://www.xiaohei.info)
