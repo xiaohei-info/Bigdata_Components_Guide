@@ -448,5 +448,3 @@ index文件中该key对应的value**是data文件中，该key对应的value的�
 
 MapFile文件的读写流程和SequenceFile类似，只要将SequenceFile.Writer/Reader替换为**MapFile.Writer/Reader**即可   
 如果需要改变默认的每隔128个key记录一次，可以通过SequenceFile.Writer实例的**setIndexInterval()**设置**io.map.index.interval**属性即可
-
-作者：[@小黑](http://www.xiaohei.info)
