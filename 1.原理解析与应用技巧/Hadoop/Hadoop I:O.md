@@ -185,7 +185,7 @@ public interface Writable{
 
 大部分Hadoop的基本数据类型并不是直接实现Writable接口，而是通过实现一个**WritableComparable接口**来实现，如下图：
 
-![Hadoop数据类型继承图](images/hadoop-base-datatype.png)
+![Hadoop数据类型继承图](/images/hadoop-base-datatype.png)
 
 WritableComparable接口的定义如下：
 
