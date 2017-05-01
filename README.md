@@ -1,20 +1,28 @@
 # Bigdata Components Guide
 
+大数据生态圈各个组件的原理解析、Demo教程、运行过程中的填坑记录和一些官方文档的翻译。
+
+目前主要是Hadoop、HBase、Spark等。
+
+由于大数据生态圈的工具越来越丰富，个人能力有限，只是把学过的/在项目中应用过的组件记录起来，如果你也有好的经验文档，欢迎补充^_^
+
+附(一些大数据组件)
+
 计算框架：
-- Beam:Google
-- Tez:Hortonworks
-- Spark:UC Berkeley
-- Flink:TU Berlin
-- Storm:Twitter
-- Heron:Twitter
+- Beam：Google
+- Tez：Hortonworks
+- Spark：UC Berkeley
+- Flink：TU Berlin
+- Storm：Twitter
+- Heron：Twitter
 
 数据传输：
-- Flume:Cloudera
-- Sqoop:Cloudera
-- Nifi:NSA
-- Kafka:LinkedIn
+- Flume：Cloudera
+- Sqoop：Cloudera
+- Nifi：NSA
+- Kafka：LinkedIn
 
-SQL On Hadoop:
+SQL On Hadoop：
 - Impala：Cloudera
 - Hive：Facebook
 - Presto：Facebook
